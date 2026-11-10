@@ -23,7 +23,7 @@ env:
 jobs:
   native-candidate:
     if: github.repository == 'pimmink/cmux'
-    runs-on: macos-15-intel
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - name: Checkout the exact native application candidate
@@ -35,7 +35,7 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
-      - name: Verify source and Intel toolchain identity
+      - name: Verify source and arm64 toolchain identity
         env:
           VAULT_WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
@@ -43,7 +43,7 @@ jobs:
           [[ "$VAULT_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$VAULT_SOURCE_SHA"
           git merge-base --is-ancestor "$VAULT_BASE_SHA" HEAD
-          test "$(uname -m)" = x86_64
+          test "$(uname -m)" = arm64
           # The repository pins Xcode 26 (Swift tools 6.2). The runner image default
           # can be older (Swift 6.1), so select the newest installed Xcode first.
           XCODE_APP="$(find /Applications -maxdepth 1 -name 'Xcode*.app' -print 2>/dev/null | sort | tail -n 1 || true)"
@@ -119,7 +119,7 @@ jobs:
           toolchain="$(awk -F '\"' '/^[[:space:]]*channel[[:space:]]*=/{print $2; exit}' Native/DiffSidecar/rust-toolchain.toml)"
           [[ "$toolchain" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt
-          rustup target add --toolchain "$toolchain" x86_64-apple-darwin
+          rustup target add --toolchain "$toolchain" aarch64-apple-darwin
           rustup run "$toolchain" cargo --version
           rustup run "$toolchain" rustc --version
           cargo --version
@@ -159,8 +159,8 @@ jobs:
               if not path.is_file():
                   raise SystemExit(f"Missing {name} executable.")
               arch = subprocess.check_output(["lipo", "-archs", str(path)], text=True).strip()
-              if "x86_64" not in arch.split():
-                  raise SystemExit(f"The {name} binary has no Intel slice.")
+              if "arm64" not in arch.split():
+                  raise SystemExit(f"The {name} binary has no arm64 slice.")
               architectures[name] = arch
               hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
           subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
@@ -179,7 +179,7 @@ jobs:
               "hostAcceptance": "NOT-RUN",
           }
           (root / "vault-artifacts" / "app-receipt.json").write_text(json.dumps(result, indent=2) + "\n")
-          print("Tagged Intel application and CLI verified; no host acceptance claimed.")
+          print("Tagged arm64 application and CLI verified; no host acceptance claimed.")
           PY
 
       - name: Compile the complete app-host test product
