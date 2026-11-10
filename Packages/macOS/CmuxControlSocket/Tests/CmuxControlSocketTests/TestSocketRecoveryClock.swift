@@ -23,9 +23,9 @@ final class TestSocketRecoveryClock: SocketRecoveryClock, @unchecked Sendable {
                     return nil
                 }
                 switch shouldResume {
-                case true:
+                case .some(true):
                     continuation.resume()
-                case false:
+                case .some(false):
                     continuation.resume(throwing: CancellationError())
                 case nil:
                     break
