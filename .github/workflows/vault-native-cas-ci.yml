@@ -92,7 +92,7 @@ jobs:
           from pathlib import Path
           root = Path(os.environ["RUNNER_TEMP"])
           text = (root / "vault-work" / "package.log").read_text()
-          counts = re.findall(r"Test run with (\d+) tests? passed", text)
+          counts = re.findall(r"Test run with (\d+) tests?(?: in \d+ suites?)? passed", text)
           if not counts or int(counts[-1]) <= 0:
               raise SystemExit("No positive executed Swift Testing count was produced.")
           result = {"scope": "CmuxControlSocket", "passed": int(counts[-1]), "exitCode": 0}
