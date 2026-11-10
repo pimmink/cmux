@@ -216,6 +216,113 @@ struct SurfaceResumeSocketApprovalTests {
 
     // MARK: - Harness
 
+    @Test
+    func conditionalSetRequiresAbsenceAndPreservesLegacyReplacement() async throws {
+        await Self.waitForSigningSecret()
+        let capabilities = try v2Result(method: "system.capabilities", params: [:])
+        let methods = capabilities["methods"] as? [String]
+        #expect(methods?.contains("surface.resume.conditional_set.v1") == true)
+        try withRegisteredWindow { windowID, workspace, panelID in
+            var params: [String: Any] = [
+                "window_id": windowID.uuidString, "surface_id": panelID.uuidString,
+                "command": "vault-cas-initial", "source": "gsd",
+                "checkpoint_id": "checkpoint", "if_unbound": true,
+            ]
+            #expect(workspace.surfaceResumeBinding(panelId: panelID) == nil)
+            _ = try v2Result(method: "surface.resume.set", params: params)
+            let initial = try #require(workspace.surfaceResumeBinding(panelId: panelID))
+            params["command"] = "vault-cas-rejected"
+            let rejected = try v2Envelope(method: "surface.resume.set", params: params)
+            #expect(rejected["ok"] as? Bool == false)
+            #expect((rejected["error"] as? [String: Any])?["code"] as? String == "binding_conflict")
+            #expect(workspace.surfaceResumeBinding(panelId: panelID) == initial)
+            params.removeValue(forKey: "if_unbound")
+            params["command"] = "vault-cas-legacy"
+            _ = try v2Result(method: "surface.resume.set", params: params)
+            #expect(workspace.surfaceResumeBinding(panelId: panelID)?.command == "vault-cas-legacy")
+        }
+    }
+
+    @Test(arguments: [
+        "generation", "source", "checkpoint", "absence",
+        "checkpoint-nfc", "checkpoint-nfd", "source-nfc", "source-nfd",
+    ])
+    func conditionalSetPreservesWriterThatChangedBindingAfterShow(field: String) async throws {
+        await Self.waitForSigningSecret()
+        try withRegisteredWindow { windowID, workspace, panelID in
+            let target: [String: Any] = [
+                "window_id": windowID.uuidString, "surface_id": panelID.uuidString,
+            ]
+            var params = target
+            let nfc = "caf\u{00E9}"
+            let nfd = "cafe\u{0301}"
+            let expected = field.hasSuffix("nfc") ? nfd : nfc
+            let actual = field.hasSuffix("nfc") ? nfc : nfd
+            params["command"] = "vault-cas-old"
+            params["checkpoint_id"] = field.hasPrefix("checkpoint-") ? expected : "checkpoint"
+            params["source"] = field.hasPrefix("source-") ? expected : "gsd"
+            _ = try v2Result(method: "surface.resume.set", params: params)
+            let shown = try v2Result(method: "surface.resume.get", params: target)
+            let observed = try #require(shown["resume_binding"] as? [String: Any])
+            let old = try #require(workspace.surfaceResumeBinding(panelId: panelID))
+
+            // A real model mutation occurs after the caller's show and before
+            // its set. Isolate each guard component; source/checkpoint changes
+            // deliberately retain the timestamp so a timestamp-only fence fails.
+            if field == "absence" {
+                _ = try v2Result(method: "surface.resume.clear", params: target)
+            } else {
+                var replacement = old
+                replacement.command = "vault-cas-foreign"
+                if field == "generation" { replacement.updatedAt += 1 }
+                if field == "source" { replacement.source = "manual" }
+                if field == "checkpoint" { replacement.checkpointId = "foreign-checkpoint" }
+                if field.hasPrefix("checkpoint-") || field.hasPrefix("source-") {
+                    if field.hasPrefix("checkpoint-") { replacement.checkpointId = actual }
+                    if field.hasPrefix("source-") { replacement.source = actual }
+                    let oldIdentity = try #require(field.hasPrefix("checkpoint-") ? old.checkpointId : old.source)
+                    #expect(oldIdentity == actual)
+                    #expect(!oldIdentity.utf8.elementsEqual(actual.utf8))
+                    #expect(replacement.updatedAt == old.updatedAt)
+                }
+                #expect(workspace.setSurfaceResumeBinding(replacement, panelId: panelID))
+            }
+            let winner = workspace.surfaceResumeBinding(panelId: panelID)
+            if field.hasPrefix("checkpoint-") || field.hasPrefix("source-") {
+                let shownTimestamp = try #require(observed["updated_at"] as? Double)
+                #expect(winner?.updatedAt == shownTimestamp)
+            }
+            params["command"] = "vault-cas-stale"
+            params["if_checkpoint_id"] = try #require(observed["checkpoint_id"] as? String)
+            params["if_source"] = try #require(observed["source"] as? String)
+            params["if_updated_at"] = try #require(observed["updated_at"] as? Double)
+            let rejected = try v2Envelope(method: "surface.resume.set", params: params)
+            #expect(rejected["ok"] as? Bool == false)
+            #expect((rejected["error"] as? [String: Any])?["code"] as? String == "binding_conflict")
+            #expect(workspace.surfaceResumeBinding(panelId: panelID) == winner)
+        }
+    }
+
+    @Test
+    func conditionalSetReplacesExactlyObservedGeneration() async throws {
+        await Self.waitForSigningSecret()
+        try withRegisteredWindow { windowID, workspace, panelID in
+            var params: [String: Any] = [
+                "window_id": windowID.uuidString, "surface_id": panelID.uuidString,
+                "command": "vault-cas-before", "source": "gsd", "checkpoint_id": "checkpoint",
+            ]
+            _ = try v2Result(method: "surface.resume.set", params: params)
+            let shown = try v2Result(method: "surface.resume.get", params: params)
+            let observed = try #require(shown["resume_binding"] as? [String: Any])
+            params["if_checkpoint_id"] = try #require(observed["checkpoint_id"] as? String)
+            params["if_source"] = try #require(observed["source"] as? String)
+            params["if_updated_at"] = try #require(observed["updated_at"] as? Double)
+            params["command"] = "vault-cas-after"
+            _ = try v2Result(method: "surface.resume.set", params: params)
+            #expect(workspace.surfaceResumeBinding(panelId: panelID)?.command == "vault-cas-after")
+        }
+    }
+
     private static func waitForSigningSecret() async {
         await withCheckedContinuation { continuation in
             SurfaceResumeApprovalStore.whenSigningSecretReady {
@@ -262,14 +369,18 @@ struct SurfaceResumeSocketApprovalTests {
         try body(windowID, workspace, panel.id)
     }
 
-    private func v2Result(method: String, params: [String: Any]) throws -> [String: Any] {
+    private func v2Envelope(method: String, params: [String: Any]) throws -> [String: Any] {
         let request = ["id": method, "method": method, "params": params] as [String: Any]
         let data = try JSONSerialization.data(withJSONObject: request)
         let requestLine = try #require(String(data: data, encoding: .utf8))
         let raw = TerminalController.shared.handleSocketLine(requestLine)
         let responseData = try #require(raw.data(using: .utf8))
-        let envelope = try #require(JSONSerialization.jsonObject(with: responseData) as? [String: Any])
-        #expect(envelope["ok"] as? Bool == true, Comment(rawValue: raw))
-        return try #require(envelope["result"] as? [String: Any], Comment(rawValue: raw))
+        return try #require(JSONSerialization.jsonObject(with: responseData) as? [String: Any])
+    }
+
+    private func v2Result(method: String, params: [String: Any]) throws -> [String: Any] {
+        let envelope = try v2Envelope(method: method, params: params)
+        #expect(envelope["ok"] as? Bool == true, Comment(rawValue: String(describing: envelope)))
+        return try #require(envelope["result"] as? [String: Any])
     }
 }

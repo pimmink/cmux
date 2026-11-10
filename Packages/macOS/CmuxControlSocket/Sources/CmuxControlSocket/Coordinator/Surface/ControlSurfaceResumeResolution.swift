@@ -22,6 +22,9 @@ public enum ControlSurfaceResumeResolution: Sendable, Equatable {
     /// `resume.set`'s store call failed for any other reason (legacy
     /// `internal_error` / "Failed to set resume binding").
     case setFailed
+    /// The selected surface no longer satisfies the caller's set expectation.
+    /// No binding was changed or cleared.
+    case bindingConflict
     /// The resume result. Carries the echoed identity, the cleared flag, and the
     /// resulting binding (a `null` binding still emits the `resume_binding` key).
     case result(ControlSurfaceResumeSnapshot)

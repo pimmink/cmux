@@ -114149,6 +114149,242 @@
         }
       }
     },
+    "socket.surfaceResume.error.invalidCondition": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invalid resume binding condition"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ungültige Bedingung für die Fortsetzungsbindung"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Condition de liaison de reprise invalide"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "شرط ربط الاستئناف غير صالح"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Condición de vínculo de reanudación no válida"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "續接綁定條件無效"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复绑定条件无效"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "잘못된 재개 바인딩 조건"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再開バインディングの条件が無効です"
+          }
+        }
+      }
+    },
+    "socket.surfaceResume.error.bindingConflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume binding changed"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsetzungsbindung wurde geändert"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La liaison de reprise a changé"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "تغيّر ربط الاستئناف"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El vínculo de reanudación ha cambiado"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "續接綁定已變更"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复绑定已更改"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "재개 바인딩이 변경되었습니다"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再開バインディングが変更されました"
+          }
+        }
+      }
+    },
+    "cli.surfaceResume.conditionalSet.usage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conditional set (requires surface.resume.conditional_set.v1):\n  --if-unbound\n  OR --if-checkpoint-id <id> --if-source <source> --if-updated-at <number>\nA mismatch returns binding_conflict without changing the binding."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bedingtes Setzen (erfordert surface.resume.conditional_set.v1):\n  --if-unbound\n  ODER --if-checkpoint-id <id> --if-source <source> --if-updated-at <number>\nBei einer Abweichung wird binding_conflict zurückgegeben; die Bindung bleibt unverändert."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Définition conditionnelle (nécessite surface.resume.conditional_set.v1) :\n  --if-unbound\n  OU --if-checkpoint-id <id> --if-source <source> --if-updated-at <number>\nUne différence renvoie binding_conflict sans modifier la liaison."
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "تعيين مشروط (يتطلب surface.resume.conditional_set.v1):\n  --if-unbound\n  أو --if-checkpoint-id <id> --if-source <source> --if-updated-at <number>\nعند عدم التطابق، يتم إرجاع binding_conflict دون تغيير الربط."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Asignación condicional (requiere surface.resume.conditional_set.v1):\n  --if-unbound\n  O --if-checkpoint-id <id> --if-source <source> --if-updated-at <number>\nUna discrepancia devuelve binding_conflict sin cambiar el vínculo."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "條件式設定（需要 surface.resume.conditional_set.v1）：\n  --if-unbound\n  或 --if-checkpoint-id <id> --if-source <source> --if-updated-at <number>\n不相符時傳回 binding_conflict，且不變更綁定。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "条件设置（需要 surface.resume.conditional_set.v1）：\n  --if-unbound\n  或 --if-checkpoint-id <id> --if-source <source> --if-updated-at <number>\n不匹配时返回 binding_conflict，且不更改绑定。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "조건부 설정(surface.resume.conditional_set.v1 필요):\n  --if-unbound\n  또는 --if-checkpoint-id <id> --if-source <source> --if-updated-at <number>\n일치하지 않으면 바인딩을 변경하지 않고 binding_conflict를 반환합니다."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "条件付き設定（surface.resume.conditional_set.v1 が必要）：\n  --if-unbound\n  または --if-checkpoint-id <id> --if-source <source> --if-updated-at <number>\n一致しない場合は binding_conflict を返し、バインディングを変更しません。"
+          }
+        }
+      }
+    },
+    "cli.surfaceResume.set.error.invalidCondition": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "surface resume set requires --if-unbound or all of --if-checkpoint-id, --if-source, and finite --if-updated-at; guards cannot be combined or repeated"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "surface resume set benötigt --if-unbound oder alle Optionen --if-checkpoint-id, --if-source und ein endliches --if-updated-at; Bedingungen dürfen nicht kombiniert oder wiederholt werden"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "surface resume set nécessite --if-unbound ou les trois options --if-checkpoint-id, --if-source et un --if-updated-at fini ; les conditions ne peuvent pas être combinées ni répétées"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "يتطلب surface resume set الخيار --if-unbound أو الخيارات --if-checkpoint-id و--if-source و--if-updated-at بقيمة عددية منتهية؛ لا يمكن الجمع بين الشروط أو تكرارها"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "surface resume set requiere --if-unbound o las tres opciones --if-checkpoint-id, --if-source y un --if-updated-at finito; las condiciones no se pueden combinar ni repetir"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "surface resume set 需要 --if-unbound，或同時提供 --if-checkpoint-id、--if-source 和有限數值的 --if-updated-at；條件不能組合或重複"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "surface resume set 需要 --if-unbound，或同时提供 --if-checkpoint-id、--if-source 和有限数值的 --if-updated-at；条件不能组合或重复"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "surface resume set에는 --if-unbound 또는 --if-checkpoint-id, --if-source 및 유한한 --if-updated-at 값이 모두 필요합니다. 조건을 함께 사용하거나 반복할 수 없습니다"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "surface resume set には --if-unbound、または --if-checkpoint-id、--if-source、有限値の --if-updated-at のすべてが必要です。条件の併用や繰り返しはできません"
+          }
+        }
+      }
+    },
     "cli.surface.usage": {
       "extractionState": "manual",
       "localizations": {

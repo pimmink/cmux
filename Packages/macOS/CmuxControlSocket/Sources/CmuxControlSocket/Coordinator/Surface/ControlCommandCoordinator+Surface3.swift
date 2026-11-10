@@ -38,6 +38,15 @@ extension ControlCommandCoordinator {
             !command.isEmpty else {
             return .err(code: "invalid_params", message: "Missing command", data: nil)
         }
+        let condition: ControlSurfaceResumeSetCondition?
+        do {
+            condition = try ControlSurfaceResumeSetCondition.parse(params)
+        } catch {
+            return .err(code: "invalid_params", message: String(
+                localized: "socket.surfaceResume.error.invalidCondition",
+                defaultValue: "Invalid resume binding condition"
+            ), data: nil)
+        }
         let source = publicResumeSource(params)
         let remoteWorkspaceID = uuid(params, "_cmux_remote_workspace_id")
         if hasNonNull(params, "_cmux_remote_workspace_id"), remoteWorkspaceID == nil {
@@ -77,7 +86,8 @@ extension ControlCommandCoordinator {
             permissionMode: optionalTrimmedRawString(params, "permission_mode"),
             autoResume: source == "agent-hook" ? (bool(params, "auto_resume") ?? false) : false,
             remoteWorkspaceID: remoteWorkspaceID,
-            resumeEvidenceProvenance: optionalTrimmedRawString(params, "resume_evidence_provenance")
+            resumeEvidenceProvenance: optionalTrimmedRawString(params, "resume_evidence_provenance"),
+            condition: condition
         )
         return surfaceResumeResult(
             context?.controlSurfaceResumeSet(
@@ -194,6 +204,11 @@ extension ControlCommandCoordinator {
             )
         case .setFailed:
             return .err(code: "internal_error", message: "Failed to set resume binding", data: nil)
+        case .bindingConflict:
+            return .err(code: "binding_conflict", message: String(
+                localized: "socket.surfaceResume.error.bindingConflict",
+                defaultValue: "Resume binding changed"
+            ), data: nil)
         case .result(let snapshot):
             var result: [String: JSONValue] = [
                 "window_id": orNull(snapshot.windowID?.uuidString),

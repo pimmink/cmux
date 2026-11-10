@@ -11609,7 +11609,9 @@ struct CMUXCLI {
             let target = try surfaceResumeTarget(rest, client: client, windowOverride: windowOverride)
             var params = target.params
             let splitRemaining = splitAtArgumentTerminator(target.remaining)
-            let (name, rem1) = parseOption(splitRemaining.options, name: "--name")
+            let conditionOptions = try surfaceResumeSetConditionOptions(splitRemaining.options)
+            for (key, value) in conditionOptions.params { params[key] = value }
+            let (name, rem1) = parseOption(conditionOptions.remaining, name: "--name")
             let (kind, rem2) = parseOption(rem1, name: "--kind")
             let (checkpoint, rem3) = parseOption(rem2, name: "--checkpoint")
             let (checkpointID, rem4) = parseOption(rem3, name: "--checkpoint-id")
@@ -11756,7 +11758,8 @@ struct CMUXCLI {
 
     private func validateSurfaceResumeSetCommandTokensBeforeSocket(_ args: [String]) throws {
         let splitArgs = splitAtArgumentTerminator(args)
-        let (_, rem1) = parseOption(splitArgs.options, name: "--workspace")
+        let conditionOptions = try surfaceResumeSetConditionOptions(splitArgs.options)
+        let (_, rem1) = parseOption(conditionOptions.remaining, name: "--workspace")
         let (_, rem2) = parseOption(rem1, name: "--surface")
         let (_, rem3) = parseOption(rem2, name: "--window")
         let (_, rem4) = parseOption(rem3, name: "--name")
@@ -11771,7 +11774,7 @@ struct CMUXCLI {
             throw CLIError(message: "surface resume set: unexpected argument '\(unexpected)' after --shell. Quote the full shell command or use -- <argv...>")
         }
         if let unknownFlag = remaining.first(where: { $0.hasPrefix("-") && $0 != "-" }) {
-            let knownFlags = Self.surfaceResumeSetValueOptions.sorted().joined(separator: ", ")
+            let knownFlags = Self.surfaceResumeSetValueOptions.union(["--if-unbound"]).sorted().joined(separator: ", ")
             throw CLIError(message: String(
                 format: String(
                     localized: "cli.surfaceResume.set.error.unknownFlag",
@@ -11786,9 +11789,41 @@ struct CMUXCLI {
         }
     }
 
+    /// Shared by pre-socket validation and the set runner. Guards after `--`
+    /// remain literal command arguments, never condition options.
+    private func surfaceResumeSetConditionOptions(
+        _ options: [String]
+    ) throws -> (params: [String: Any], remaining: [String]) {
+        let flags = ["--if-unbound", "--if-checkpoint-id", "--if-source", "--if-updated-at"]
+        let invalid = CLIError(message: CMUXDiffViewerLocalization.string(
+            "cli.surfaceResume.set.error.invalidCondition",
+            defaultValue: "surface resume set requires --if-unbound or all of --if-checkpoint-id, --if-source, and finite --if-updated-at; guards cannot be combined or repeated"
+        ))
+        for flag in flags {
+            let occurrences = options.filter { $0 == flag || $0.hasPrefix(flag + "=") }.count
+            guard occurrences <= 1 else { throw invalid }
+        }
+        guard !options.contains(where: { $0.hasPrefix("--if-unbound=") }) else { throw invalid }
+        let unbound = options.contains("--if-unbound")
+        let (checkpointID, rem1) = parseOption(options.filter { $0 != "--if-unbound" }, name: "--if-checkpoint-id")
+        let (source, rem2) = parseOption(rem1, name: "--if-source")
+        let (timestamp, remaining) = parseOption(rem2, name: "--if-updated-at")
+        let hasIdentity = checkpointID != nil || source != nil || timestamp != nil
+        if unbound {
+            guard !hasIdentity else { throw invalid }
+            return (["if_unbound": true], remaining)
+        }
+        guard hasIdentity else { return ([:], remaining) }
+        guard let checkpointID, !checkpointID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let timestamp, let updatedAt = Double(timestamp), updatedAt.isFinite else { throw invalid }
+        return (["if_checkpoint_id": checkpointID, "if_source": source, "if_updated_at": updatedAt], remaining)
+    }
+
     private static let surfaceResumeTargetValueOptions: Set<String> = ["--workspace", "--surface", "--window"]
     private static let surfaceResumeSetValueOptions: Set<String> = surfaceResumeTargetValueOptions.union([
         "--name", "--kind", "--checkpoint", "--checkpoint-id", "--source", "--cwd", "--shell",
+        "--if-checkpoint-id", "--if-source", "--if-updated-at",
     ])
     private static let surfaceResumeClearValueOptions: Set<String> = surfaceResumeTargetValueOptions.union([
         "--checkpoint", "--checkpoint-id", "--source",
@@ -22766,6 +22801,14 @@ struct CMUXCLI {
               cmux surface resume set --kind tmux --shell "tmux attach -t work"
               cmux surface resume set --kind opencode --checkpoint ses_123 -- opencode --session ses_123
               cmux surface resume show --json
+            """
+            ) + "\n\n" + CMUXDiffViewerLocalization.string(
+                "cli.surfaceResume.conditionalSet.usage",
+                defaultValue: """
+            Conditional set (requires surface.resume.conditional_set.v1):
+              --if-unbound
+              OR --if-checkpoint-id <id> --if-source <source> --if-updated-at <number>
+            A mismatch returns binding_conflict without changing the binding.
             """
             )
         case "debug-terminals":

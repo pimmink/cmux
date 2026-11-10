@@ -34,6 +34,9 @@ public struct ControlSurfaceResumeSetInputs: Sendable, Equatable {
     /// The relay-claimed remote workspace, authenticated by the app context.
     public let remoteWorkspaceID: UUID?
 
+    /// Optional expectation checked atomically against the selected surface's binding.
+    public let condition: ControlSurfaceResumeSetCondition?
+
     /// Creates resume-set inputs.
     ///
     /// - Parameters:
@@ -59,7 +62,8 @@ public struct ControlSurfaceResumeSetInputs: Sendable, Equatable {
         permissionMode: String?,
         autoResume: Bool,
         remoteWorkspaceID: UUID?,
-        resumeEvidenceProvenance: String? = nil
+        resumeEvidenceProvenance: String? = nil,
+        condition: ControlSurfaceResumeSetCondition? = nil
     ) {
         self.name = name
         self.kind = kind
@@ -73,5 +77,6 @@ public struct ControlSurfaceResumeSetInputs: Sendable, Equatable {
         self.autoResume = autoResume
         self.resumeEvidenceProvenance = resumeEvidenceProvenance
         self.remoteWorkspaceID = remoteWorkspaceID
+        self.condition = condition
     }
 }

@@ -184,8 +184,9 @@ import Testing
             Comment(rawValue: rejected.diagnostics)
         )
         let knownFlags = [
-            "--checkpoint", "--checkpoint-id", "--cwd", "--kind", "--name",
-            "--shell", "--source", "--surface", "--window", "--workspace",
+            "--checkpoint", "--checkpoint-id", "--cwd", "--if-checkpoint-id", "--if-source",
+            "--if-unbound", "--if-updated-at", "--kind", "--name", "--shell", "--source",
+            "--surface", "--window", "--workspace",
         ].joined(separator: ", ")
         #expect(
             rejected.stderr.contains("Known flags: \(knownFlags)."),
@@ -212,6 +213,141 @@ import Testing
             methods == ["surface.resume.get", "surface.resume.get"],
             "An unknown flag must be rejected before a binding mutation request is sent: \(methods)"
         )
+    }
+
+    @Test(arguments: [
+        "absence", "replacement", "alias-absence", "alias-replacement", "conflict",
+        "inline-replacement", "alias-inline-replacement",
+    ])
+    func surfaceResumeSetCLIForwardsConditionalGuards(mode: String) throws {
+        let cliPath = try bundledCLIPath()
+        let socketPath = "/tmp/cmux-resume-cas-\(UUID().uuidString.prefix(8)).sock"
+        let conflict = mode == "conflict"
+        let response: String
+        if conflict {
+            response = "{\"id\":1,\"ok\":false,\"error\":{\"code\":\"binding_conflict\",\"message\":\"Resume binding changed\"}}"
+        } else {
+            response = try resumeBindingResponse(command: "resume")
+        }
+        let responder = try UnixSocketResponder(path: socketPath, responses: [response])
+        defer { responder.stop() }
+        var environment = ProcessInfo.processInfo.environment
+        for key in Array(environment.keys) where key.hasPrefix("CMUX_") {
+            environment.removeValue(forKey: key)
+        }
+        environment["CMUX_SOCKET_PATH"] = socketPath
+        environment["CMUX_CLI_SENTRY_DISABLED"] = "1"
+        let prefix = mode.hasPrefix("alias") ? ["surface-resume"] : ["surface", "resume"]
+        let absence = mode.hasSuffix("absence") || conflict
+        let guards: [String]
+        if absence {
+            guards = ["--if-unbound"]
+        } else if mode.contains("inline") {
+            guards = ["--if-checkpoint-id=checkpoint", "--if-source=gsd", "--if-updated-at=42.5"]
+        } else {
+            guards = ["--if-checkpoint-id", "checkpoint", "--if-source", "gsd", "--if-updated-at", "42.5"]
+        }
+        let result = runProcess(
+            executablePath: cliPath,
+            arguments: prefix + ["set", "--shell", "resume"] + guards,
+            environment: environment, timeout: 5
+        )
+        #expect(!result.timedOut, Comment(rawValue: result.diagnostics))
+        #expect(conflict ? result.status != 0 : result.status == 0, Comment(rawValue: result.diagnostics))
+        let requests = try responder.receivedRequests.map { request in
+            try #require(JSONSerialization.jsonObject(with: Data(request.utf8)) as? [String: Any])
+        }
+        #expect(requests.count == 1, "A conflict must not retry an unguarded write or clear")
+        let request = try #require(requests.first)
+        #expect(request["method"] as? String == "surface.resume.set")
+        let params = try #require(request["params"] as? [String: Any])
+        #expect(params["command"] as? String == "resume")
+        #expect(params["launch_command"] == nil)
+        if absence {
+            #expect(params["if_unbound"] as? Bool == true)
+            #expect(params["if_checkpoint_id"] == nil)
+        } else {
+            #expect(params["if_checkpoint_id"] as? String == "checkpoint")
+            #expect(params["if_source"] as? String == "gsd")
+            #expect(params["if_updated_at"] as? Double == 42.5)
+            #expect(params["if_unbound"] == nil)
+        }
+    }
+
+    @Test(arguments: [
+        ["--if-checkpoint-id", "checkpoint"],
+        ["--if-source", "gsd"],
+        ["--if-updated-at", "42.5"],
+        ["--if-unbound", "--if-source", "gsd"],
+        ["--if-unbound", "--if-unbound"],
+        ["--if-checkpoint-id", "checkpoint", "--if-source", "gsd", "--if-updated-at", "NaN"],
+        ["--if-checkpoint-id", "checkpoint", "--if-source", "gsd", "--if-updated-at", "inf"],
+        ["--if-checkpoint-id", "checkpoint", "--if-source", "gsd", "--if-updated-at", "-inf"],
+        ["--if-checkpoint-id", "checkpoint", "--if-source", "gsd", "--if-updated-at", "true"],
+        ["--if-checkpoint-id", "", "--if-source", "gsd", "--if-updated-at", "42.5"],
+        ["--if-checkpoint-id", "checkpoint", "--if-source", " ", "--if-updated-at", "42.5"],
+        ["--if-checkpoint-id", "checkpoint", "--if-checkpoint-id", "again"],
+    ])
+    func surfaceResumeSetCLIRejectsMalformedConditionsBeforeSocket(guards: [String]) throws {
+        let cliPath = try bundledCLIPath()
+        let socketPath = "/tmp/cmux-resume-cas-bad-\(UUID().uuidString.prefix(8)).sock"
+        let responder = try UnixSocketResponder(
+            path: socketPath, responses: [try resumeBindingResponse(command: "must-not-be-sent")]
+        )
+        defer { responder.stop() }
+        var environment = ProcessInfo.processInfo.environment
+        for key in Array(environment.keys) where key.hasPrefix("CMUX_") {
+            environment.removeValue(forKey: key)
+        }
+        environment["CMUX_SOCKET_PATH"] = socketPath
+        environment["CMUX_CLI_SENTRY_DISABLED"] = "1"
+        let result = runProcess(
+            executablePath: cliPath,
+            arguments: ["surface", "resume", "set", "--shell", "resume"] + guards,
+            environment: environment, timeout: 5
+        )
+        #expect(!result.timedOut, Comment(rawValue: result.diagnostics))
+        #expect(result.status != 0, Comment(rawValue: result.diagnostics))
+        #expect(result.stderr.contains("surface resume set"), Comment(rawValue: result.diagnostics))
+        #expect(responder.receivedRequests.isEmpty)
+    }
+
+    @Test(arguments: [
+        ["--if-checkpoint-id=first", "--if-checkpoint-id=checkpoint", "--if-source=gsd", "--if-updated-at=42.5"],
+        ["--if-checkpoint-id", "first", "--if-checkpoint-id=checkpoint", "--if-source=gsd", "--if-updated-at=42.5"],
+        ["--if-checkpoint-id=first", "--if-checkpoint-id", "checkpoint", "--if-source=gsd", "--if-updated-at=42.5"],
+        ["--if-checkpoint-id=checkpoint", "--if-source=first", "--if-source=gsd", "--if-updated-at=42.5"],
+        ["--if-checkpoint-id=checkpoint", "--if-source", "first", "--if-source=gsd", "--if-updated-at=42.5"],
+        ["--if-checkpoint-id=checkpoint", "--if-source=first", "--if-source", "gsd", "--if-updated-at=42.5"],
+        ["--if-checkpoint-id=checkpoint", "--if-source=gsd", "--if-updated-at=41", "--if-updated-at=42.5"],
+        ["--if-checkpoint-id=checkpoint", "--if-source=gsd", "--if-updated-at", "41", "--if-updated-at=42.5"],
+        ["--if-checkpoint-id=checkpoint", "--if-source=gsd", "--if-updated-at=41", "--if-updated-at", "42.5"],
+        ["--if-unbound=true"],
+        ["--if-unbound=false"],
+        ["--if-unbound", "--if-unbound=true"],
+    ])
+    func surfaceResumeSetCLIRejectsRepeatedInlineConditionsBeforeSocket(guards: [String]) throws {
+        let cliPath = try bundledCLIPath()
+        let socketPath = "/tmp/cmux-resume-cas-repeat-\(UUID().uuidString.prefix(8)).sock"
+        let responder = try UnixSocketResponder(
+            path: socketPath, responses: [try resumeBindingResponse(command: "must-not-be-sent")]
+        )
+        defer { responder.stop() }
+        var environment = ProcessInfo.processInfo.environment
+        for key in Array(environment.keys) where key.hasPrefix("CMUX_") {
+            environment.removeValue(forKey: key)
+        }
+        environment["CMUX_SOCKET_PATH"] = socketPath
+        environment["CMUX_CLI_SENTRY_DISABLED"] = "1"
+        let result = runProcess(
+            executablePath: cliPath,
+            arguments: ["surface", "resume", "set", "--shell", "resume"] + guards,
+            environment: environment, timeout: 5
+        )
+        #expect(!result.timedOut, Comment(rawValue: result.diagnostics))
+        #expect(result.status != 0, Comment(rawValue: result.diagnostics))
+        #expect(result.stdout.isEmpty, Comment(rawValue: result.diagnostics))
+        #expect(responder.receivedRequests.isEmpty)
     }
 
     @Test func testSurfaceResumeJSONDoesNotExposePrivateSubrouterRoutingMetadata() throws {

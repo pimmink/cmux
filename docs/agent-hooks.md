@@ -72,6 +72,33 @@ Claude Code's `PushNotification` tool (model-initiated "notify the user now" pus
 
 Grok uses its `Notification` hook for user-facing completion messages. cmux records `Stop` as idle state, but leaves the visible notification text to the `Notification` payload so repeated turns keep Grok's own message instead of a generic completion fallback.
 
+### Conditional resume binding publication
+
+Clients that must not overwrite another publisher require the
+`surface.resume.conditional_set.v1` capability from `system.capabilities` before
+calling `surface.resume.set`. Older hosts may ignore unknown parameters; do not
+fall back to an unconditional write when the capability or a conditional request fails.
+
+A set request may contain exactly one of these expectations:
+
+| Expectation | JSON parameters | CLI options |
+| --- | --- | --- |
+| No current binding | `if_unbound: true` | `--if-unbound` |
+| Observed binding generation | All of `if_checkpoint_id`, `if_source`, `if_updated_at` | All of `--if-checkpoint-id`, `--if-source`, `--if-updated-at` |
+
+Use the checkpoint, source, and numeric timestamp returned by `surface.resume.get`
+(`cmux surface resume show --json`). Identity strings must be nonempty and are
+compared exactly. The timestamp must be finite; booleans and numeric strings are
+not timestamps. Partial expectations, combinations, and `if_unbound: false` return
+`invalid_params` before mutation. With no expectation, legacy set behavior is unchanged.
+
+The native app compares the selected surface's current binding after approval
+resolution and assigns in the same MainActor turn. A changed generation, source,
+checkpoint, or binding presence returns `binding_conflict`; the CLI exits nonzero
+and leaves the current binding unchanged. A conflict does not clear or retry a binding.
+Conditional publication does not grant approval or automatic resume, and does not
+change command-signature matching or the native Review Approval flow.
+
 ## Workspace auto-naming
 
 When the opt-in `automation.workspaceAutoNaming` setting is enabled, turn-end hooks also drive AI naming of workspaces and tabs. Supported adapters are Claude Code, Codex, Grok, OpenCode, Pi, and OMP; each adapter gates on the live setting over the socket, reuses the session store above for throttle state, summarizes with that agent's own CLI in a no-tools or isolated headless mode, and never overwrites a name the user set. Gemini, Amp, Cursor, Antigravity, Kiro, Rovo Dev, Hermes Agent, Copilot, CodeBuddy, Factory, and Qoder are skipped until they have both a verified conversation source and a safe cheap non-interactive summarizer runner. See [workspace-auto-naming.md](workspace-auto-naming.md).

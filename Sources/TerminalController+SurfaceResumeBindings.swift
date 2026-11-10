@@ -366,6 +366,19 @@ extension TerminalController {
             effectiveBinding = resolved.binding
             approvalRequired = resolved.approvalRequired
         }
+        // Approval resolution may enter app-owned code. Read the same current
+        // binding as resume.get only afterwards, then check and assign in this
+        // MainActor turn without an await, modal, or control-socket yield.
+        if let condition = inputs.condition {
+            let current = target.binding
+            guard condition.matches(
+                checkpointID: current?.checkpointId,
+                source: current?.source,
+                updatedAt: current?.updatedAt
+            ) else {
+                return .bindingConflict
+            }
+        }
         guard target.setBinding(effectiveBinding) else {
             // A same-session agent-hook write cannot demote a trusted binding.
             // Report the binding the surface kept rather than a set failure, so

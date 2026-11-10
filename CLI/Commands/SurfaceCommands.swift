@@ -362,6 +362,10 @@ struct SurfaceResumeSetCommand: SharedLegacyFacadeCommand {
     @Option(name: .customLong("source")) var source: String?
     @Option(name: .customLong("cwd"), completion: .directory) var cwd: String?
     @Option(name: .customLong("shell")) var shell: String?
+    @Flag(name: .customLong("if-unbound")) var ifUnbound = false
+    @Option(name: .customLong("if-checkpoint-id")) var ifCheckpointID: String?
+    @Option(name: .customLong("if-source")) var ifSource: String?
+    @Option(name: .customLong("if-updated-at")) var ifUpdatedAt: String?
     /// `--shell <command>` or `-- <argv...>`; the runner rejects both together.
     @Argument(parsing: .captureForPassthrough) var command: [String] = []
     static let configuration = CommandConfiguration(commandName: "set", helpNames: [])

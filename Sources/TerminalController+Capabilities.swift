@@ -314,6 +314,7 @@ extension TerminalController {
             "terminal.participant.disconnect",
             "terminal.participants.disconnect_others",
             "surface.resume.set",
+            "surface.resume.conditional_set.v1",
             "surface.resume.get",
             "surface.resume.clear",
             "agent.restore.admit",

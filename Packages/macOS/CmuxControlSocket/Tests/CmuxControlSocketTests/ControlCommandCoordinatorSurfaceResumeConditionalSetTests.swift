@@ -120,6 +120,97 @@ struct ControlCommandCoordinatorSurfaceResumeConditionalSetTests {
         #expect(!mutationWasDispatched)
     }
 
+    @Test func absenceConditionReachesMutationDispatch() {
+        let context = makeContext()
+        let coordinator = ControlCommandCoordinator(context: context)
+        _ = coordinator.handle(ControlRequest(
+            id: .int(1), method: "surface.resume.set",
+            params: ["command": .string("resume"), "if_unbound": .bool(true)]
+        ))
+        #expect(context.resumeSetInputs?.condition == .unbound)
+    }
+
+    @Test(arguments: [JSONValue.int(42), .double(42), .decimal("42.0")])
+    func replacementConditionRetainsExactIdentity(updatedAt: JSONValue) {
+        let context = makeContext()
+        let coordinator = ControlCommandCoordinator(context: context)
+        _ = coordinator.handle(ControlRequest(
+            id: .int(1), method: "surface.resume.set",
+            params: [
+                "command": .string("resume"),
+                "if_checkpoint_id": .string(" /fixture/session.jsonl "),
+                "if_source": .string("gsd"),
+                "if_updated_at": updatedAt,
+            ]
+        ))
+        #expect(context.resumeSetInputs?.condition == .binding(
+            checkpointID: " /fixture/session.jsonl ", source: "gsd", updatedAt: 42
+        ))
+    }
+
+    @Test func nativeConflictIsReportedWithoutSuccessPayload() {
+        let context = makeContext()
+        context.resumeResolution = .bindingConflict
+        let coordinator = ControlCommandCoordinator(context: context)
+        let result = coordinator.handle(ControlRequest(
+            id: .int(1), method: "surface.resume.set",
+            params: ["command": .string("resume"), "if_unbound": .bool(true)]
+        ))
+        guard case .err(let code, _, _) = result else {
+            Issue.record("Expected binding_conflict without a success payload")
+            return
+        }
+        #expect(code == "binding_conflict")
+    }
+
+    @Test(arguments: ["generation", "source", "checkpoint", "absence"])
+    func replacementConditionRejectsChangedBinding(field: String) {
+        let condition = ControlSurfaceResumeSetCondition.binding(
+            checkpointID: "checkpoint", source: "gsd", updatedAt: 42
+        )
+        #expect(condition.matches(checkpointID: "checkpoint", source: "gsd", updatedAt: 42))
+        #expect(!condition.matches(
+            checkpointID: field == "checkpoint" ? "replacement" : "checkpoint",
+            source: field == "source" ? "manual" : "gsd",
+            updatedAt: field == "absence" ? nil : (field == "generation" ? 43 : 42)
+        ))
+    }
+
+    @Test(arguments: ["checkpoint-nfc", "checkpoint-nfd", "source-nfc", "source-nfd"])
+    func replacementConditionRejectsCanonicallyEquivalentIdentity(field: String) {
+        let nfc = "caf\u{00E9}"
+        let nfd = "cafe\u{0301}"
+        #expect(nfc == nfd) // Swift String equality deliberately treats these as equivalent.
+        #expect(!nfc.utf8.elementsEqual(nfd.utf8))
+        let expected = field.hasSuffix("nfc") ? nfd : nfc
+        let actual = field.hasSuffix("nfc") ? nfc : nfd
+        let checkpoint = field.hasPrefix("checkpoint")
+        let condition = ControlSurfaceResumeSetCondition.binding(
+            checkpointID: checkpoint ? expected : "checkpoint",
+            source: checkpoint ? "gsd" : expected,
+            updatedAt: 42
+        )
+        #expect(!condition.matches(
+            checkpointID: checkpoint ? actual : "checkpoint",
+            source: checkpoint ? "gsd" : actual,
+            updatedAt: 42
+        ))
+        #expect(condition.matches(
+            checkpointID: checkpoint ? expected : "checkpoint",
+            source: checkpoint ? "gsd" : expected,
+            updatedAt: 42
+        ))
+    }
+
+    @Test func absenceConditionRejectsAnyExistingBinding() {
+        #expect(ControlSurfaceResumeSetCondition.unbound.matches(
+            checkpointID: nil, source: nil, updatedAt: nil
+        ))
+        #expect(!ControlSurfaceResumeSetCondition.unbound.matches(
+            checkpointID: nil, source: nil, updatedAt: 0
+        ))
+    }
+
     @Test func unguardedSetRetainsLegacyMutationDispatch() {
         let context = makeContext()
         let coordinator = ControlCommandCoordinator(context: context)
@@ -136,6 +227,7 @@ struct ControlCommandCoordinatorSurfaceResumeConditionalSetTests {
             return
         }
         #expect(context.resumeSetInputs?.command == command)
+        #expect(context.resumeSetInputs?.condition == nil)
     }
 
     private func makeContext() -> FakeSurfaceControlCommandContext {
