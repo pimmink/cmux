@@ -44,6 +44,12 @@ jobs:
           test "$(git rev-parse HEAD)" = "$VAULT_SOURCE_SHA"
           git merge-base --is-ancestor "$VAULT_BASE_SHA" HEAD
           test "$(uname -m)" = x86_64
+          # The repository pins Xcode 26 (Swift tools 6.2). The runner image default
+          # can be older (Swift 6.1), so select the newest installed Xcode first.
+          XCODE_APP="$(find /Applications -maxdepth 1 -name 'Xcode*.app' -print 2>/dev/null | sort | tail -n 1 || true)"
+          test -n "$XCODE_APP"
+          export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
           sw_vers
           xcodebuild -version
           xcrun swift --version
