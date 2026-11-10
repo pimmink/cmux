@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - ci/vault-cas-host-20261110
+  workflow_dispatch:
 
 permissions:
   contents: read
