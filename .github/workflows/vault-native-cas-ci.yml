@@ -1,0 +1,220 @@
+name: Vault native CAS candidate
+
+on:
+  push:
+    branches:
+      - ci/vault-cas-host-20261110
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vault-native-cas-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Reviewed application candidate; do not confuse this with the CI-only workflow SHA.
+  VAULT_SOURCE_SHA: 33daf63d0152d5c7f26155506f0beb191e5ad3da
+  VAULT_BASE_SHA: cb03c00ff0f39358fe497df31df735ab17b4bbb1
+  CMUX_DEV_BACKEND_MODE: local
+  CMUX_TERMINAL_CLIENT_FORCE_REMOTE_XCFRAMEWORK: "1"
+
+jobs:
+  native-candidate:
+    if: github.repository == 'pimmink/cmux'
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    steps:
+      - name: Checkout the exact native application candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: pimmink/cmux
+          ref: ${{ env.VAULT_SOURCE_SHA }}
+          fetch-depth: 64
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Verify source and Intel toolchain identity
+        env:
+          VAULT_WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$VAULT_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$VAULT_SOURCE_SHA"
+          git merge-base --is-ancestor "$VAULT_BASE_SHA" HEAD
+          test "$(uname -m)" = x86_64
+          sw_vers
+          xcodebuild -version
+          xcrun swift --version
+          git submodule status --recursive
+          mkdir -p "$RUNNER_TEMP/vault-artifacts" "$RUNNER_TEMP/vault-work"
+          printf 'VAULT_TAG=vault3014-cas-%s\n' "$GITHUB_RUN_ID" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          receipt = {
+              "schemaVersion": 1,
+              "applicationRepository": "pimmink/cmux",
+              "applicationSha": os.environ["VAULT_SOURCE_SHA"],
+              "baseSha": os.environ["VAULT_BASE_SHA"],
+              "workflowSha": os.environ["VAULT_WORKFLOW_SHA"],
+              "workflowRunId": os.environ["GITHUB_RUN_ID"],
+              "workflowRunAttempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "runnerArchitecture": subprocess.check_output(["uname", "-m"], text=True).strip(),
+              "xcode": subprocess.check_output(["xcodebuild", "-version"], text=True).strip(),
+              "swift": subprocess.check_output(["xcrun", "swift", "--version"], text=True).strip(),
+              "hostAcceptance": "NOT-RUN",
+          }
+          path = Path(os.environ["RUNNER_TEMP"]) / "vault-artifacts" / "source-receipt.json"
+          path.write_text(json.dumps(receipt, indent=2) + "\n")
+          print("Application and workflow revisions recorded separately.")
+          PY
+
+      - name: Scoped native source checks
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-local.py --only swift-syntax --only test-wiring --swift-changed "$VAULT_BASE_SHA"
+          git diff "$VAULT_BASE_SHA" HEAD --check
+
+      - name: Execute the complete socket package
+        run: |
+          set -euo pipefail
+          swift test -j 2 --package-path Packages/macOS/CmuxControlSocket 2>&1 | tee "$RUNNER_TEMP/vault-work/package.log"
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          text = (root / "vault-work" / "package.log").read_text()
+          counts = re.findall(r"Test run with (\d+) tests? passed", text)
+          if not counts or int(counts[-1]) <= 0:
+              raise SystemExit("No positive executed Swift Testing count was produced.")
+          result = {"scope": "CmuxControlSocket", "passed": int(counts[-1]), "exitCode": 0}
+          (root / "vault-artifacts" / "package-summary.json").write_text(json.dumps(result, indent=2) + "\n")
+          print(result)
+          PY
+
+      - name: Provision only pinned public GhosttyKit artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GHOSTTYKIT_DOWNLOAD_RETRIES: "2"
+          GHOSTTYKIT_DOWNLOAD_RETRY_DELAY: "5"
+          GHOSTTYKIT_DOWNLOAD_MAX_TIME: "60"
+        run: |
+          set -euo pipefail
+          ./scripts/download-prebuilt-ghosttykit.sh
+          test -d GhosttyKit.xcframework
+
+      - name: Provision the pinned native sidecar Rust toolchain
+        run: |
+          set -euo pipefail
+          export PATH="${CARGO_HOME:-${HOME}/.cargo}/bin:$PATH"
+          command -v rustup >/dev/null
+          toolchain="$(awk -F '\"' '/^[[:space:]]*channel[[:space:]]*=/{print $2; exit}' Native/DiffSidecar/rust-toolchain.toml)"
+          [[ "$toolchain" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt
+          rustup target add --toolchain "$toolchain" x86_64-apple-darwin
+          rustup run "$toolchain" cargo --version
+          rustup run "$toolchain" rustc --version
+          cargo --version
+
+      - name: Build a uniquely tagged candidate without launching it
+        env:
+          CMUX_GHOSTTYKIT_PREPROVISIONED: "1"
+          CMUX_SKIP_ZIG_BUILD: "1"
+        run: |
+          set -euo pipefail
+          # A fresh CI VM has no existing app with this run-unique tag.
+          # Normal tagged build retains the artifact; --launch is deliberately absent.
+          # --build-only is not used because that mode removes its staged bundle.
+          ./scripts/reload.sh --tag "$VAULT_TAG" \
+            --derived-data "$RUNNER_TEMP/vault-derived" --no-global-cli-links
+
+      - name: Verify and archive the actual tagged app and CLI
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, plistlib, re, subprocess
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          tag = os.environ["VAULT_TAG"]
+          app = root / "vault-derived" / "Build" / "Products" / "Debug" / f"cmux DEV {tag}.app"
+          if not app.is_dir():
+              raise SystemExit("The expected retained tagged bundle is missing; no guessed fallback is allowed.")
+          info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
+          expected_id = "com.cmuxterm.app.debug." + re.sub(r"[^a-z0-9]+", ".", tag.lower()).strip(".")
+          if info.get("CFBundleIdentifier") != expected_id:
+              raise SystemExit("Unexpected application identity; refusing to archive.")
+          binary = app / "Contents" / "MacOS" / info["CFBundleExecutable"]
+          cli = app / "Contents" / "Resources" / "bin" / "cmux"
+          architectures = {}
+          hashes = {}
+          for name, path in [("app", binary), ("cli", cli)]:
+              if not path.is_file():
+                  raise SystemExit(f"Missing {name} executable.")
+              arch = subprocess.check_output(["lipo", "-archs", str(path)], text=True).strip()
+              if "x86_64" not in arch.split():
+                  raise SystemExit(f"The {name} binary has no Intel slice.")
+              architectures[name] = arch
+              hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+          subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+          archive = root / "vault-artifacts" / "cmux-vault-cas.zip"
+          subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(archive)], check=True)
+          result = {
+              "applicationSha": os.environ["VAULT_SOURCE_SHA"],
+              "tag": tag,
+              "bundleIdentifier": expected_id,
+              "bundleVersion": info.get("CFBundleVersion"),
+              "bundleCommit": info.get("CMUXCommit"),
+              "expectedBundleCommitPrefix": os.environ["VAULT_SOURCE_SHA"][:9],
+              "architectures": architectures,
+              "binarySha256": hashes,
+              "archiveSha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+              "hostAcceptance": "NOT-RUN",
+          }
+          (root / "vault-artifacts" / "app-receipt.json").write_text(json.dumps(result, indent=2) + "\n")
+          print("Tagged Intel application and CLI verified; no host acceptance claimed.")
+          PY
+
+      - name: Compile the complete app-host test product
+        env:
+          CMUX_GHOSTTYKIT_PREPROVISIONED: "1"
+          CMUX_SKIP_ZIG_BUILD: "1"
+        run: |
+          set -euo pipefail
+          scripts/test-unit.sh build-for-testing \
+            -derivedDataPath "$RUNNER_TEMP/vault-test-derived" CODE_SIGNING_ALLOWED=NO
+
+      - name: Execute production CAS and native CLI tests on the isolated CI VM
+        run: |
+          set -euo pipefail
+          scripts/test-unit.sh test-without-building \
+            -derivedDataPath "$RUNNER_TEMP/vault-test-derived" \
+            -only-testing:cmuxTests/SurfaceResumeSocketApprovalTests \
+            -only-testing:cmuxTests/CMUXCLIErrorOutputRegressionTests \
+            -resultBundlePath "$RUNNER_TEMP/vault-production-tests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO
+          xcrun xcresulttool get test-results summary \
+            --path "$RUNNER_TEMP/vault-production-tests.xcresult" \
+            > "$RUNNER_TEMP/vault-artifacts/production-tests-summary.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ["RUNNER_TEMP"]) / "vault-artifacts" / "production-tests-summary.json"
+          result = json.loads(path.read_text())
+          if int(result.get("totalTestCount", 0)) <= 0:
+              raise SystemExit("No production app-host tests executed.")
+          if int(result.get("failedTests", 0)) != 0 or int(result.get("skippedTests", 0)) != 0:
+              raise SystemExit("Failed or skipped production tests are not acceptance evidence.")
+          print("Positive production test count verified:", result["totalTestCount"])
+          PY
+
+      - name: Upload candidate and source-bound summaries only
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vault-native-cas-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/vault-artifacts/*.zip
+            ${{ runner.temp }}/vault-artifacts/*.json
