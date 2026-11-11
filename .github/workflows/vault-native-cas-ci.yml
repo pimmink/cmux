@@ -255,6 +255,7 @@ jobs:
       - name: Execute production CAS and native CLI tests on the isolated CI VM
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/vault-artifacts"
           scripts/test-unit.sh test-without-building \
             -derivedDataPath "$GITHUB_WORKSPACE/.vault-test-derived" \
             -only-testing:cmuxTests/SurfaceResumeSocketApprovalTests \
