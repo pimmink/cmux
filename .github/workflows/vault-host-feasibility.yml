@@ -1,0 +1,23 @@
+name: Vault host feasibility
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-feasibility:
+    if: github.repository == 'pimmink/cmux'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Report session and UI capability (read-only)
+        run: |
+          set -uo pipefail
+          echo "whoami=$(whoami)"
+          echo "console_user=$(stat -f %Su /dev/console)"
+          echo "gui_session=$(launchctl print "gui/$(id -u)" >/dev/null 2>&1 && echo yes || echo no)"
+          echo "screencapture_bin=$(command -v screencapture || echo missing)"
+          echo "osascript_ui=$(osascript -e 'tell application "System Events" to get name of processes' >/dev/null 2>&1 && echo ok || echo blocked)"
+          sw_vers
