@@ -124,6 +124,15 @@ jobs:
           rustup run "$toolchain" rustc --version
           cargo --version
 
+      - name: Restore DerivedData cache for this application SHA
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            .vault-derived
+            .vault-test-derived
+          key: vault-derived-${{ runner.os }}-${{ env.VAULT_SOURCE_SHA }}
+          restore-keys: vault-derived-${{ runner.os }}-
+
       - name: Build a uniquely tagged candidate without launching it
         env:
           CMUX_GHOSTTYKIT_PREPROVISIONED: "1"
@@ -134,7 +143,7 @@ jobs:
           # Normal tagged build retains the artifact; --launch is deliberately absent.
           # --build-only is not used because that mode removes its staged bundle.
           ./scripts/reload.sh --tag "$VAULT_TAG" \
-            --derived-data "$RUNNER_TEMP/vault-derived" --no-global-cli-links
+            --derived-data "$GITHUB_WORKSPACE/.vault-derived" --no-global-cli-links
 
       - name: Verify and archive the actual tagged app and CLI
         run: |
@@ -144,7 +153,7 @@ jobs:
           from pathlib import Path
           root = Path(os.environ["RUNNER_TEMP"])
           tag = os.environ["VAULT_TAG"]
-          app = root / "vault-derived" / "Build" / "Products" / "Debug" / f"cmux DEV {tag}.app"
+          app = Path(os.environ["GITHUB_WORKSPACE"]) / ".vault-derived" / "Build" / "Products" / "Debug" / f"cmux DEV {tag}.app"
           if not app.is_dir():
               raise SystemExit("The expected retained tagged bundle is missing; no guessed fallback is allowed.")
           info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
@@ -225,6 +234,15 @@ jobs:
           ./scripts/download-prebuilt-ghosttykit.sh
           test -d GhosttyKit.xcframework
 
+      - name: Restore test DerivedData cache for this application SHA
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            .vault-derived
+            .vault-test-derived
+          key: vault-derived-${{ runner.os }}-${{ env.VAULT_SOURCE_SHA }}
+          restore-keys: vault-derived-${{ runner.os }}-
+
       - name: Compile the complete app-host test product
         env:
           CMUX_GHOSTTYKIT_PREPROVISIONED: "1"
@@ -232,13 +250,13 @@ jobs:
         run: |
           set -euo pipefail
           scripts/test-unit.sh build-for-testing \
-            -derivedDataPath "$RUNNER_TEMP/vault-test-derived" CODE_SIGNING_ALLOWED=NO
+            -derivedDataPath "$GITHUB_WORKSPACE/.vault-test-derived" CODE_SIGNING_ALLOWED=NO
 
       - name: Execute production CAS and native CLI tests on the isolated CI VM
         run: |
           set -euo pipefail
           scripts/test-unit.sh test-without-building \
-            -derivedDataPath "$RUNNER_TEMP/vault-test-derived" \
+            -derivedDataPath "$GITHUB_WORKSPACE/.vault-test-derived" \
             -only-testing:cmuxTests/SurfaceResumeSocketApprovalTests \
             -only-testing:cmuxTests/CMUXCLIErrorOutputRegressionTests \
             -resultBundlePath "$RUNNER_TEMP/vault-production-tests.xcresult" \
