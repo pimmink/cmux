@@ -1,0 +1,52 @@
+name: Vault History menu read (isolated)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  history-menu-read:
+    if: github.repository == 'pimmink/cmux'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Download the reviewed tagged application artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/vault-art"
+          gh run download 43029132858 --repo pimmink/cmux \
+            --name vault-native-cas-43029132858-1 --dir "$RUNNER_TEMP/vault-art"
+          cd "$RUNNER_TEMP/vault-art"
+          unzip -q cmux-vault-cas.zip -d unpacked
+          APP="$(find unpacked -maxdepth 1 -name '*.app' -print -quit)"
+          codesign --verify --deep --strict "$APP"
+          echo "APP_PATH=$RUNNER_TEMP/vault-art/$APP" >> "$GITHUB_ENV"
+
+      - name: Launch the isolated tagged app and read the History menu (no activation)
+        run: |
+          set -uo pipefail
+          open -n "$APP_PATH"
+          sleep 25
+          EXEC="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Contents/Info.plist")"
+          echo "process=$EXEC"
+          osascript <<OSA || echo "menu-read-failed"
+          tell application "System Events"
+            set p to first process whose name is "$EXEC"
+            set mbNames to name of every menu bar item of menu bar 1 of p
+            log mbNames
+            tell menu bar item "History" of menu bar 1 of p
+              click
+              delay 1
+              set items to name of every menu item of menu 1
+              log items
+            end tell
+            key code 53
+          end tell
+          OSA
+          osascript -e "tell application \"System Events\" to get name of every menu bar item of menu bar 1 of (first process whose name is \"$EXEC\")" 2>&1 | head -c 2000
+          pkill -f "$EXEC" || true
