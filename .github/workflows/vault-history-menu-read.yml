@@ -39,12 +39,11 @@ jobs:
             set p to first process whose name is "$EXEC"
             set mbNames to name of every menu bar item of menu bar 1 of p
             log mbNames
-            tell menu bar item "History" of menu bar 1 of p
-              click
-              delay 1
-              set items to name of every menu item of menu 1
-              log items
-            end tell
+            set hm to menu bar item "History" of menu bar 1 of p
+            click hm
+            delay 1
+            set histItems to name of every menu item of menu 1 of hm
+            log histItems
             key code 53
           end tell
           OSA
