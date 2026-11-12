@@ -24,28 +24,34 @@ jobs:
           cd "$RUNNER_TEMP/vault-art"
           unzip -q cmux-vault-cas.zip -d unpacked
           APP="$(find unpacked -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$APP"
           codesign --verify --deep --strict "$APP"
           echo "APP_PATH=$RUNNER_TEMP/vault-art/$APP" >> "$GITHUB_ENV"
 
-      - name: Launch the isolated tagged app and read the History menu (no activation)
+      - name: Launch the tagged app and read the History submenu (no activation)
         run: |
-          set -uo pipefail
+          set -euo pipefail
           open -n "$APP_PATH"
-          sleep 25
-          EXEC="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Contents/Info.plist")"
-          echo "process=$EXEC"
-          osascript <<OSA || echo "menu-read-failed"
-          tell application "System Events"
-            set p to first process whose name is "$EXEC"
-            set mbNames to name of every menu bar item of menu bar 1 of p
-            return mbNames
-            set hm to menu bar item "History" of menu bar 1 of p
-            click hm
-            delay 1
-            set histItems to name of every menu item of menu 1 of hm
-            return histItems
-            key code 53
-          end tell
-          OSA
-          osascript -e "tell application \"System Events\" to get name of every menu bar item of menu bar 1 of (first process whose name is \"$EXEC\")" 2>&1 | head -c 2000
-          pkill -f "$EXEC" || true
+          PID=""
+          for _ in $(seq 1 60); do
+            PID="$(pgrep -f "$APP_PATH/Contents/MacOS/" | head -1 || true)"
+            [ -n "$PID" ] && break
+            sleep 2
+          done
+          test -n "$PID"
+          echo "app_pid=$PID"
+          NAMES="$(osascript -e "
+            tell application \"System Events\"
+              set p to first process whose unix id is $PID
+              set hm to menu bar item \"History\" of menu bar 1 of p
+              click hm
+              delay 1
+              set out to name of every menu item of menu 1 of hm
+              key code 53
+              return out
+            end tell")"
+          echo "history_items_begin"
+          printf '%s\n' "$NAMES"
+          echo "history_items_end"
+          test -n "$NAMES"
+          kill "$PID" || true
