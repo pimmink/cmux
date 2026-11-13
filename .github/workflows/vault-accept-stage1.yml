@@ -1,0 +1,76 @@
+name: Vault acceptance stage 1 (app, workspace, surface, socket)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  stage1:
+    if: github.repository == 'pimmink/cmux'
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - name: Download the reviewed tagged app and verify its binary SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          D="$RUNNER_TEMP/vault-art"; mkdir -p "$D"
+          gh run download 43029132858 --repo pimmink/cmux \
+            --name vault-native-cas-43029132858-1 --dir "$D"
+          cd "$D"
+          unzip -q cmux-vault-cas.zip -d unpacked
+          APP="$(find unpacked -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$APP"
+          BIN_SHA="$(shasum -a 256 "$APP/Contents/MacOS/cmux DEV" | cut -d' ' -f1)"
+          echo "binary_sha256=$BIN_SHA"
+          test "$BIN_SHA" = "6b8500101ed0c8668c0625f7be2e152c6bf5311219c964b2434d9a5eb9dc5b52"
+          echo "APP_PATH=$D/$APP" >> "$GITHUB_ENV"
+
+      - name: Isolated scope (disposable cwd and GSD_HOME)
+        run: |
+          set -euo pipefail
+          SCOPE="$RUNNER_TEMP/vault-scope"
+          mkdir -p "$SCOPE/cwd" "$SCOPE/gsd-home"
+          echo "SCOPE=$SCOPE" >> "$GITHUB_ENV"
+
+      - name: Launch the tagged app isolated and wait for its socket
+        run: |
+          set -uo pipefail
+          HOME="$SCOPE/gsd-home" open -n "$APP_PATH"
+          PID=""
+          for _ in $(seq 1 60); do
+            PID="$(pgrep -f "$APP_PATH/Contents/MacOS/" | head -1 || true)"
+            [ -n "$PID" ] && break; sleep 2
+          done
+          test -n "$PID" || { echo "stage=launch result=FAIL no_pid"; exit 1; }
+          echo "app_pid=$PID" 
+          echo "APP_PID=$PID" >> "$GITHUB_ENV"
+          echo "stage=launch result=PASS pid=$PID"
+
+      - name: Create one workspace and one surface through the socket (no clicks)
+        run: |
+          set -uo pipefail
+          CLI="$APP_PATH/Contents/Resources/bin/cmux"
+          test -x "$CLI" || { echo "stage=cli result=FAIL cli_missing path=$CLI"; exit 1; }
+          echo "stage=cli result=PASS path=$CLI"
+          set +e
+          WS_OUT="$("$CLI" workspace create 2>&1)"; WS_EXIT=$?
+          set -e
+          echo "workspace_create_exit=$WS_EXIT"; echo "$WS_OUT"
+          test "$WS_EXIT" = "0" || { echo "stage=workspace result=FAIL exit=$WS_EXIT"; exit 1; }
+          WS_ID="$(echo "$WS_OUT" | grep -Eo '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}' | head -1 || true)"
+          test -n "$WS_ID" || { echo "stage=workspace result=FAIL no_uuid_in_output"; exit 1; }
+          echo "workspace_uuid=$WS_ID"
+          echo "stage=workspace result=PASS uuid=$WS_ID"
+
+      - name: Upload stage-1 evidence on success and failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-accept-stage1
+          path: ${{ runner.temp }}/vault-scope
+          if-no-files-found: warn
