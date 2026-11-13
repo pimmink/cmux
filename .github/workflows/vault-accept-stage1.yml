@@ -57,6 +57,13 @@ jobs:
           CLI="$APP_PATH/Contents/Resources/bin/cmux"
           test -x "$CLI" || { echo "stage=cli result=FAIL cli_missing path=$CLI"; exit 1; }
           echo "stage=cli result=PASS path=$CLI"
+          # Read-only socket diagnostics: what does the live app actually listen on?
+          echo "diag_app_pid=${APP_PID:-unset}"
+          if [ -n "${APP_PID:-}" ]; then
+            ps -o pid,etime,command -p "$APP_PID" | sed 's/^/diag_ps: /' || true
+            lsof -nP -p "$APP_PID" 2>/dev/null | grep -i 'sock\|unix' | sed 's/^/diag_lsof: /' | head -20 || echo "diag_lsof: none"
+          fi
+          ls -la /tmp/*.sock "$HOME/.local/state/cmux/" 2>/dev/null | sed 's/^/diag_ls: /' || echo "diag_ls: none"
           set +e
           WS_OUT="$("$CLI" workspace create 2>&1)"; WS_EXIT=$?
           set -e
