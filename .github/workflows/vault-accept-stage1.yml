@@ -94,6 +94,47 @@ jobs:
           test "$(shasum -a 256 "$RUNNER_TEMP/parse_cmux_ref.py" | cut -d' ' -f1)" = "$PARSER_SHA256" || { echo "parser_sha_mismatch"; exit 1; }
           echo "parser_sha256=$PARSER_SHA256"
 
+      - name: Write the surface-check script inline and pin it by sha256
+        env:
+          SURFACE_SCRIPT_SHA256: c943ae386f6831415aef4d87ab5347e0ed9d982230444fd4f0ab9372a37773da
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/surface_in_workspace.py" <<'SURFACE_EOF'
+          """Check that a surface reference belongs to a workspace listing.
+
+          Input: the surface ref, and the `list-panels --json` stdout file.
+          Accepts a bare list or an object with a "surfaces" list. Each item must
+          carry `surface_ref` (or `ref`). Exit 0 only if the ref is present.
+          Exit 2 usage, 3 unreadable JSON, 5 ref absent.
+          """
+          import json
+          import sys
+
+
+          def surface_refs(payload):
+              items = payload if isinstance(payload, list) else payload.get("surfaces", [])
+              return [i.get("surface_ref") or i.get("ref") for i in items if isinstance(i, dict)]
+
+
+          def main(argv):
+              if len(argv) != 3:
+                  return 2
+              ref, path = argv[1], argv[2]
+              try:
+                  with open(path, encoding="utf-8") as fh:
+                      payload = json.load(fh)
+              except (OSError, ValueError):
+                  return 3
+              if not isinstance(payload, (list, dict)):
+                  return 3
+              return 0 if ref in surface_refs(payload) else 5
+
+
+          if __name__ == "__main__":
+              sys.exit(main(sys.argv))
+          SURFACE_EOF
+          test "$(shasum -a 256 "$RUNNER_TEMP/surface_in_workspace.py" | cut -d' ' -f1)" = "$SURFACE_SCRIPT_SHA256" || { echo "surface_script_sha_mismatch"; exit 1; }
+
       - name: Isolated scope (disposable cwd and GSD_HOME)
         run: |
           set -euo pipefail
@@ -132,7 +173,7 @@ jobs:
           done
           if [ -z "$SOCK" ]; then
             echo "stage=socket result=FAIL no_socket_after_90s"
-            ls -la /tmp/*.sock 2>/dev/null || true
+            find /tmp -maxdepth 1 -name '*.sock' -exec ls -la {} + 2>/dev/null || true
             exit 1
           fi
           echo "stage=socket result=PASS path=$SOCK"
@@ -142,11 +183,11 @@ jobs:
             ps -o pid,etime,command -p "$APP_PID" | sed 's/^/diag_ps: /' || true
             lsof -nP -p "$APP_PID" 2>/dev/null | grep -i 'sock\|unix' | sed 's/^/diag_lsof: /' | head -20 || echo "diag_lsof: none"
           fi
-          ls -la /tmp/*.sock "$HOME/.local/state/cmux/" 2>/dev/null | sed 's/^/diag_ls: /' || echo "diag_ls: none"
+          find /tmp -maxdepth 1 -name '*.sock' -exec ls -la {} + 2>/dev/null | sed 's/^/diag_ls: /' || echo "diag_ls: none"
           # Contract: `--json` prints the v2 payload as JSON (CLI/cmux.swift printV2Payload).
           # The reference is read from the JSON field, never from text. Real exit code kept.
           set +e
-          WS_OUT="$("$CLI" --json workspace create 2>"$RUNNER_TEMP/ws.stderr")"; WS_EXIT=$?
+          WS_OUT="$("$CLI" --socket "$SOCK" --json workspace create 2>"$RUNNER_TEMP/ws.stderr")"; WS_EXIT=$?
           set -e
           echo "workspace_create_exit=$WS_EXIT"
           echo "--- stdout (workspace create --json) ---"; echo "$WS_OUT"
@@ -155,9 +196,27 @@ jobs:
           set +e
           WS_REF="$(python3 "$RUNNER_TEMP/parse_cmux_ref.py" workspace_ref "$RUNNER_TEMP/ws.stdout" "$WS_EXIT")"; PARSE_RC=$?
           set -e
+          test "$WS_EXIT" = "0" || { echo "stage=workspace result=FAIL cli_exit=$WS_EXIT"; exit 1; }
           test "$PARSE_RC" = "0" || { echo "stage=workspace result=FAIL parse_rc=$PARSE_RC"; exit 1; }
           echo "workspace_ref=$WS_REF"
           echo "stage=workspace result=PASS ref=$WS_REF"
+
+          # Surface: the workspace create payload carries surface_ref. Read it from the same JSON,
+          # then verify read-only (list-panels --json, no create) that it belongs to THIS workspace.
+          SURF_REF="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("surface_ref",""))' "$RUNNER_TEMP/ws.stdout")" || SURF_REF=""
+          test -n "$SURF_REF" || { echo "stage=surface result=FAIL no_surface_ref_in_workspace_payload"; exit 1; }
+          echo "surface_ref=$SURF_REF"
+          set +e
+          LIST_OUT="$("$CLI" --socket "$SOCK" --json list-panels --workspace "$WS_REF" 2>"$RUNNER_TEMP/list.stderr")"; LIST_EXIT=$?
+          set -e
+          echo "list_panels_exit=$LIST_EXIT"
+          echo "--- stdout (list-panels --json) ---"; echo "$LIST_OUT"
+          echo "--- stderr (list-panels) ---"; cat "$RUNNER_TEMP/list.stderr" || true
+          printf '%s' "$LIST_OUT" > "$RUNNER_TEMP/list.stdout"
+          test "$LIST_EXIT" = "0" || { echo "stage=surface result=FAIL list_exit=$LIST_EXIT"; exit 1; }
+          python3 "$RUNNER_TEMP/surface_in_workspace.py" "$SURF_REF" "$RUNNER_TEMP/list.stdout" \
+            || { echo "stage=surface result=FAIL surface_not_in_workspace ref=$SURF_REF"; exit 1; }
+          echo "stage=surface result=PASS ref=$SURF_REF workspace=$WS_REF"
 
       - name: Upload stage-1 evidence on success and failure
         if: always()
