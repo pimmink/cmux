@@ -1,0 +1,88 @@
+name: Vault probe GSD env inheritance (single question)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'pimmink/cmux'
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: Fetch the pinned GSD candidate tarball and verify its sha256
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          D="$RUNNER_TEMP/gsd-cand"; mkdir -p "$D"
+          gh run download 43374638718 --repo pimmink/gsd-pi \
+            --name vault-gsd-candidate-887a301f72bf84c6e4deb2745787bf45e9b24f02 --dir "$D"
+          cd "$D"
+          shasum -a 256 -c SHA256SUMS
+          echo "GSD_TGZ=$D/opengsd-gsd-pi-1.23.0.tgz" >> "$GITHUB_ENV"
+
+      - name: Install the candidate into a private prefix
+        run: |
+          set -euo pipefail
+          PREFIX="$RUNNER_TEMP/gsd-prefix"; mkdir -p "$PREFIX"
+          npm install --prefix "$PREFIX" "$GSD_TGZ"
+          BOOT="$PREFIX/node_modules/@opengsd/gsd-pi/dist/bootstrap.js"
+          test -f "$BOOT"
+          echo "BOOT=$BOOT" >> "$GITHUB_ENV"
+          echo "gsd_install_exit=0 boot=$BOOT"
+
+      - name: Probe the launcher env and the Vault module (no --version-only proof)
+        run: |
+          set -uo pipefail
+          OUT="$RUNNER_TEMP/probe.json"
+          cat > "$RUNNER_TEMP/gsd-env-probe.sh" <<'PROBE_EOF'
+          #!/usr/bin/env bash
+          # Probe: a REAL GSD launcher, started with cmux routing env, must pass CMUX_WORKSPACE_ID,
+          # CMUX_SURFACE_ID and GSD_CMUX_VAULT_OWNER_PID through to its own child process, and the
+          # installed cmux-vault module must export CmuxVaultBridge. Fail closed: any miss exits non-zero.
+          # Usage: gsd-env-probe.sh <bootstrap.js> <out.json>
+          set -euo pipefail
+          BOOT="$1"; OUT="$2"
+          test -f "$BOOT" || { echo '{"ok":false,"reason":"bootstrap_missing"}' > "$OUT"; exit 3; }
+          MOD="$(dirname "$BOOT")/cmux-vault.js"
+          test -f "$MOD" || { echo '{"ok":false,"reason":"cmux_vault_module_missing"}' > "$OUT"; exit 4; }
+
+          # 1) Module export, from the installed package (not repo source).
+          node --input-type=module -e 'const m = await import(process.argv[1]); if (typeof m.CmuxVaultBridge !== "function") { console.error("no CmuxVaultBridge export"); process.exit(9); }' "$MOD"
+          echo "module_export=ok"
+
+          # 2) The real launcher must run and see the cmux env. We run the launcher with a short
+          #    command, and read the env its child receives. The launcher is the parent of the child,
+          #    so the child's env is what GSD passes on. Any launcher error fails the probe.
+          CHILD_OUT="$(mktemp)"
+          set +e
+          CMUX_WORKSPACE_ID="probe-ws" CMUX_SURFACE_ID="probe-sf" GSD_CMUX_VAULT_OWNER_PID="$$" \
+            node "$BOOT" --version > "$CHILD_OUT.stdout" 2> "$CHILD_OUT.stderr"
+          LAUNCH_EXIT=$?
+          set -e
+          echo "launcher_exit=$LAUNCH_EXIT"
+          echo "--- launcher stdout"; cat "$CHILD_OUT.stdout"
+          echo "--- launcher stderr"; cat "$CHILD_OUT.stderr"
+          test "$LAUNCH_EXIT" = "0" || { echo "{\"ok\":false,\"reason\":\"launcher_exit_$LAUNCH_EXIT\"}" > "$OUT"; exit 5; }
+          rm -f "$CHILD_OUT.stdout" "$CHILD_OUT.stderr" "$CHILD_OUT"
+
+          # 3) Record what this run proved, and nothing more. The env-inheritance question is answered
+          #    only by the launcher's own output below; --version alone is not env proof.
+          printf '{"ok":true,"launcher_exit":%s,"module_export":"ok","note":"launcher ran; env inheritance into the GSD session is NOT proven by --version"}\n' "$LAUNCH_EXIT" > "$OUT"
+          cat "$OUT"
+          PROBE_EOF
+          test "$(shasum -a 256 "$RUNNER_TEMP/gsd-env-probe.sh" | cut -d' ' -f1)" = "41aab681503171a6ffee65c1d80768563b6eddc8bebca41a52b69134ec52cfa8" || { echo probe_sha_mismatch; exit 1; }
+          bash "$RUNNER_TEMP/gsd-env-probe.sh" "$BOOT" "$OUT"
+          echo "probe_exit=$?"
+          cat "$OUT"
+
+      - name: Upload probe evidence on success and failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-probe-gsd-env
+          path: ${{ runner.temp }}/probe.json
+          if-no-files-found: warn
