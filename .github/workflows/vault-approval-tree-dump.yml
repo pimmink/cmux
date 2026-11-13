@@ -57,8 +57,26 @@ jobs:
             tell application \"System Events\"
               set p to first process whose unix id is $PID
               set out to \"windows=\" & (count of windows of p)
+              repeat with w in windows of p
+                set out to out & linefeed & \"window_name=\" & (name of w) & \" role=\" & (role of w) & \" subrole=\" & (subrole of w)
+              end repeat
               return out
-            end tell" || echo "window_count_exit=$?"
+            end tell" || echo "window_read_exit=$?"
+          # Read-only: list every button title and checkbox state in each window, no press.
+          osascript -e "
+            tell application \"System Events\"
+              set p to first process whose unix id is $PID
+              set out to \"\"
+              repeat with w in windows of p
+                repeat with b in (every button of w)
+                  set out to out & linefeed & \"button=\" & (name of b)
+                end repeat
+                repeat with c in (every checkbox of w)
+                  set out to out & linefeed & \"checkbox_value=\" & (value of c as text)
+                end repeat
+              end repeat
+              return out
+            end tell" || echo "control_read_exit=$?"
           kill "$PID" || true
           echo "tree_dump_done=yes"
 
