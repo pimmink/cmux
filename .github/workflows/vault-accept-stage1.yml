@@ -32,7 +32,7 @@ jobs:
 
       - name: Write the reviewed parser inline and pin it by sha256
         env:
-          PARSER_SHA256: 7d393574cf2b60993c813b7723c102e4b1961e4ee2651c7943767ffeada5ba90
+          PARSER_SHA256: 7a38fe1fdc753f2b0165624f845a7a929cc184d897c581a32c28bf198a148155
         run: |
           set -euo pipefail
           cat > "$RUNNER_TEMP/parse_cmux_ref.py" <<'PARSER_EOF'
@@ -40,8 +40,9 @@ jobs:
           """Parse one cmux creation result from `--json` output.
 
           Contract (CLI/cmux.swift printV2Payload): with --json the CLI prints the
-          v2 payload as a JSON object. The reference fields are `workspace_id` and
-          `surface_id` (short refs such as `workspace:1000000001`). A non-zero exit
+          v2 payload as a JSON object. The reference fields are `workspace_ref`,
+          `surface_ref`, `window_ref` and `group_ref` (short refs such as
+          `workspace:1000000001`; `group_ref` may be null). A non-zero exit
           or non-JSON output is a failure, never a pass.
 
           Usage: parse_cmux_ref.py <field> <stdout-file> <exit-code>
@@ -152,7 +153,7 @@ jobs:
           echo "--- stderr (workspace create) ---"; cat "$RUNNER_TEMP/ws.stderr" || true
           printf '%s' "$WS_OUT" > "$RUNNER_TEMP/ws.stdout"
           set +e
-          WS_REF="$(python3 "$RUNNER_TEMP/parse_cmux_ref.py" workspace_id "$RUNNER_TEMP/ws.stdout" "$WS_EXIT")"; PARSE_RC=$?
+          WS_REF="$(python3 "$RUNNER_TEMP/parse_cmux_ref.py" workspace_ref "$RUNNER_TEMP/ws.stdout" "$WS_EXIT")"; PARSE_RC=$?
           set -e
           test "$PARSE_RC" = "0" || { echo "stage=workspace result=FAIL parse_rc=$PARSE_RC"; exit 1; }
           echo "workspace_ref=$WS_REF"
