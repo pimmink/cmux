@@ -57,6 +57,21 @@ jobs:
           CLI="$APP_PATH/Contents/Resources/bin/cmux"
           test -x "$CLI" || { echo "stage=cli result=FAIL cli_missing path=$CLI"; exit 1; }
           echo "stage=cli result=PASS path=$CLI"
+          # Wait for the app to open its socket (bounded). The process existing is not enough.
+          SOCK=""
+          for _ in $(seq 1 45); do
+            for cand in "/tmp/cmux-debug-vault3014-cas-43029132858.sock" "$HOME/.local/state/cmux/cmux.sock" "/tmp/cmux.sock"; do
+              [ -S "$cand" ] && SOCK="$cand" && break
+            done
+            [ -n "$SOCK" ] && break
+            sleep 2
+          done
+          if [ -z "$SOCK" ]; then
+            echo "stage=socket result=FAIL no_socket_after_90s"
+            ls -la /tmp/*.sock 2>/dev/null || true
+            exit 1
+          fi
+          echo "stage=socket result=PASS path=$SOCK"
           # Read-only socket diagnostics: what does the live app actually listen on?
           echo "diag_app_pid=${APP_PID:-unset}"
           if [ -n "${APP_PID:-}" ]; then
