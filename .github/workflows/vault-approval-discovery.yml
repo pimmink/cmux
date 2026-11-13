@@ -1,0 +1,77 @@
+name: Vault approval UI discovery (read-only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  approval-discovery:
+    if: github.repository == 'pimmink/cmux'
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: Download the reviewed tagged app artifact and verify its binary SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          D="$RUNNER_TEMP/vault-art"
+          mkdir -p "$D"
+          gh run download 43029132858 --repo pimmink/cmux \
+            --name vault-native-cas-43029132858-1 --dir "$D"
+          cd "$D"
+          unzip -q cmux-vault-cas.zip -d unpacked
+          APP="$(find unpacked -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$APP"
+          BIN_SHA="$(shasum -a 256 "$APP/Contents/MacOS/cmux DEV" | cut -d' ' -f1)"
+          echo "binary_sha256=$BIN_SHA"
+          test "$BIN_SHA" = "6b8500101ed0c8668c0625f7be2e152c6bf5311219c964b2434d9a5eb9dc5b52"
+          codesign --verify --deep --strict "$APP"
+          echo "APP_PATH=$D/$APP" >> "$GITHUB_ENV"
+
+      - name: Create an isolated disposable cwd and GSD_HOME
+        run: |
+          set -euo pipefail
+          SCOPE="$RUNNER_TEMP/vault-scope"
+          mkdir -p "$SCOPE/cwd" "$SCOPE/gsd-home"
+          echo "SCOPE=$SCOPE" >> "$GITHUB_ENV"
+
+      - name: Launch the tagged app with isolated home and read the window tree (no clicks)
+        run: |
+          set -euo pipefail
+          HOME="$SCOPE/gsd-home" open -n "$APP_PATH"
+          PID=""
+          for _ in $(seq 1 60); do
+            PID="$(pgrep -f "$APP_PATH/Contents/MacOS/" | head -1 || true)"
+            [ -n "$PID" ] && break
+            sleep 2
+          done
+          test -n "$PID"
+          echo "app_pid=$PID"
+          # Prove isolation from the running process itself, not from the shell that launched it.
+          APP_HOME="$(ps eww -p "$PID" -o command= | tr ' ' '\n' | grep '^HOME=' | head -1 || true)"
+          echo "app_process_home=${APP_HOME:-unknown}"
+          echo "expected_home=HOME=$SCOPE/gsd-home"
+          BUNDLE="$(osascript -e "tell application \"System Events\" to get bundle identifier of (first process whose unix id is $PID)")"
+          echo "app_bundle=$BUNDLE"
+          osascript -e "
+            tell application \"System Events\"
+              set p to first process whose unix id is $PID
+              set out to \"windows=\" & (count of windows of p)
+              repeat with w in windows of p
+                set out to out & linefeed & \"window=\" & (name of w)
+              end repeat
+              return out
+            end tell" || echo "window_read_exit=$?"
+          kill "$PID" || true
+
+      - name: Upload discovery evidence on success and failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-approval-discovery
+          path: ${{ runner.temp }}/vault-scope
+          if-no-files-found: warn
